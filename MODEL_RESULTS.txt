@@ -1,0 +1,15 @@
+LegitPhish Random Forest training
+Rows used: 101,218 (one row with missing ClassLabel removed)
+Features used: 13 URL features
+Model: RandomForestClassifier, 300 trees
+Train/test split: 80/20, stratified, random_state=42
+
+Test accuracy: 99.9358%
+Confusion matrix:
+[[12728, 8],
+ [5, 7503]]
+
+Important: this is test-set performance on the supplied LegitPhish dataset, not a guarantee of real-world accuracy.
+Label mapping from the dataset source:
+0 = Phishing
+1 = Legitimate
