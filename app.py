@@ -16,6 +16,9 @@ st.set_page_config(
 
 MODEL_FILE = "phishing_random_forest.joblib"
 
+if "scan_history" not in st.session_state:
+    st.session_state.scan_history = []
+
 RISK_LEVELS = {
     "Safe": {
         "color": "#20c997",
@@ -141,6 +144,56 @@ def predict_url(raw_url):
         "legitimate_probability": legitimate_probability,
         "features": extracted,
     }
+
+def build_reason_paragraph(result):
+    """Create a readable explanation from observed URL features.
+    This is an explanation layer; the Random Forest remains the classifier.
+    """
+    f = result["features"]
+    signals = []
+
+    if f["has_ip_address"]:
+        signals.append("the host is an IP address")
+    if not f["https_flag"]:
+        signals.append("the URL does not use HTTPS")
+    if f["subdomain_count"] >= 2:
+        signals.append(f"it contains {f['subdomain_count']} subdomain levels")
+    if f["has_hyphen_in_domain"]:
+        signals.append("the domain contains a hyphen")
+    if f["number_of_digits"] >= 4:
+        signals.append(f"it contains {f['number_of_digits']} digits")
+    if f["url_length"] >= 100:
+        signals.append(f"the URL is relatively long ({f['url_length']} characters)")
+    if f["query_param_count"] >= 3:
+        signals.append(f"it contains {f['query_param_count']} query parameters")
+    if f["suspicious_file_extension"]:
+        signals.append("the path ends with a file extension often seen in suspicious links")
+    if f["percentage_numeric_chars"] >= 10:
+        signals.append("a relatively large share of its characters are digits")
+
+    if not signals:
+        signals.append("the extracted URL characteristics do not contain the selected high-risk structural signals")
+
+    if result["risk"] == "High Risk":
+        opening = "The Random Forest classified this URL as phishing with a high model probability."
+    elif result["risk"] == "Suspicious":
+        opening = "The Random Forest produced a mixed-risk prediction for this URL."
+    else:
+        opening = "The Random Forest classified this URL as more likely legitimate."
+
+    if len(signals) == 1:
+        details = signals[0]
+    elif len(signals) == 2:
+        details = signals[0] + " and " + signals[1]
+    else:
+        details = ", ".join(signals[:-1]) + ", and " + signals[-1]
+
+    return (
+        f"{opening} The prediction is based on the combination of the 13 URL features "
+        f"extracted from the input. In this URL, {details}. "
+        "These are model-input characteristics, not proof that a website is malicious, "
+        "and false positives or false negatives are possible."
+    )
 
 def inject_styles():
     st.markdown(
@@ -285,6 +338,26 @@ def render_result(result):
     for name, value in result["features"].items():
         st.write(f"**{display_names.get(name, name)}:** {value:.4f}" if isinstance(value, float) else f"**{display_names.get(name, name)}:** {value}")
 
+    st.markdown("### Why did the model give this result?")
+    st.info(build_reason_paragraph(result))
+
+
+def render_history():
+    st.markdown("### Scan History")
+    if not st.session_state.scan_history:
+        st.caption("No URLs have been scanned in this session yet.")
+        return
+
+    st.caption("Session history only — it is cleared when the app session is restarted.")
+    for item in reversed(st.session_state.scan_history):
+        st.markdown(
+            f"**{item['risk']}** — `{item['url']}`  \n"
+            f"Prediction: **{item['prediction']}** · "
+            f"Phishing probability: **{item['phishing_probability']:.2f}%** · "
+            f"{item['time']}"
+        )
+        st.divider()
+
 def main():
     inject_styles()
 
@@ -299,6 +372,8 @@ def main():
         st.write("Random Forest")
         st.write("Dataset: LegitPhish")
         st.write("Binary classification: Phishing / Legitimate")
+        st.markdown('<div class="side-label" style="margin-top:28px;">History</div>', unsafe_allow_html=True)
+        st.write("Session-based scan history is shown below the prediction.")
 
     st.markdown('<div style="color:#315efb;font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:1.7px;">Machine Learning URL analysis</div>', unsafe_allow_html=True)
     st.title("Phishing Website Detection")
@@ -333,7 +408,15 @@ def main():
             return
 
         try:
-            render_result(predict_url(raw_url))
+            result = predict_url(raw_url)
+            render_result(result)
+            st.session_state.scan_history.append({
+                "url": result["normalized"],
+                "risk": result["risk"],
+                "prediction": result["prediction"],
+                "phishing_probability": result["phishing_probability"] * 100,
+                "time": __import__("datetime").datetime.now().strftime("%H:%M:%S"),
+            })
         except Exception as exc:
             st.error("The ML model could not analyze this URL.")
             st.exception(exc)
@@ -352,6 +435,9 @@ def main():
             """,
             unsafe_allow_html=True,
         )
+
+    st.markdown("---")
+    render_history()
 
 if __name__ == "__main__":
     main()
